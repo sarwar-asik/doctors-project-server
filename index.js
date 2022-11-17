@@ -1,5 +1,6 @@
 const express = require("express");
 const cors = require("cors");
+const jwt = require("jsonwebtoken");
 
 const app = express();
 
@@ -25,6 +26,23 @@ const client = new MongoClient(uri, {
   serverApi: ServerApiVersion.v1,
 });
 
+// for verify JWT ///
+function verifyJWT(req, res, next) {
+  // console.log("token", req.headers.authorization);
+  const authHeader = req.headers.authorization;
+  if (!authHeader) {
+    return res.status(401).send("Unauthorized 401 from verifyJWT func");
+  }
+  const token = authHeader.split(" ")[1];
+  jwt.verify(token, process.env.ACCESS_TOKEN, function (err, decoded) {
+    if (err) {
+      return res.status(403).send({ message: "Forbidden access" });
+    }
+    req.decoded = decoded;
+    next();
+  });
+}
+
 async function run() {
   try {
     const appointmentOptionCollection = client
@@ -34,6 +52,26 @@ async function run() {
     const bookingCollection = client
       .db("doctors-portal")
       .collection("bookings");
+
+    const usersCollection = client.db("doctors-portal").collection("users");
+
+    // for toke JWT ///
+
+    app.get("/jwt", async (req, res) => {
+      const email = req.query.email;
+      const query = { email: email };
+
+      const user = await usersCollection.findOne(query);
+      // console.log(user);
+
+      if (user && user.email) {
+        const token = jwt.sign({ email }, process.env.ACCESS_TOKEN, {
+          expiresIn: "3h",
+        });
+        return res.send({ accessToken: token });
+      }
+      res.status(403).send({ accessToken: "" });
+    });
 
     /***
      * API Naming Convention
@@ -164,15 +202,41 @@ async function run() {
     });
     // cl;ose advance
 
-    app.get("/bookings", async (req, res) => {
+    app.get("/bookings", verifyJWT, async (req, res) => {
       const email = req.query.email;
+      const decodedEmail = req.decoded.email;
 
+      if (email !== decodedEmail) {
+        return res.status(403).send({ message: "Forbidden access" });
+      }
+      // console.log(email);
       const query = { email: email };
 
       const bookings = await bookingCollection.find(query).toArray();
 
       res.send(bookings);
     });
+
+    // post user //
+    app.post("/users", async (req, res) => {
+      const user = req.body;
+      console.log(user);
+      const result = await usersCollection.insertOne(user);
+
+      res.send(result);
+    });
+
+// get user 
+app.get('/users',async(req,res)=>{
+
+  const query ={}
+  const result = await usersCollection.find(query).toArray()
+  res.send(result)
+})
+
+
+
+
   } finally {
   }
 }
